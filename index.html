@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Shinra – Browser-MMORPG Prototyp</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#111827;color:#f8fafc;font-family:system-ui,Segoe UI,sans-serif}
+#wrap{position:relative;width:100%;height:100%;display:grid;place-items:center;background:radial-gradient(ellipse at center,#263447,#101722)}
+canvas{display:block;width:min(100vw,1400px);height:min(100vh,800px);object-fit:contain;background:#283d32;image-rendering:pixelated;touch-action:none}
+.panel{position:absolute;background:#101827dd;border:1px solid #ffffff28;border-radius:12px;padding:10px 13px;backdrop-filter:blur(5px);box-shadow:0 8px 25px #0005}
+#hud{top:12px;left:12px;min-width:210px}#stats{font-size:13px;color:#dbeafe;margin-top:5px}
+.bar{height:9px;background:#344054;border-radius:9px;overflow:hidden;margin:5px 0}.fill{height:100%;width:100%;transition:width .15s}
+#hpfill{background:#dc4654}#xpfill{background:#e5b341}
+#help{right:12px;top:12px;max-width:235px;font-size:12px;color:#d1d5db;line-height:1.5}
+#quest{left:12px;bottom:12px;font-size:13px;max-width:260px}
+#msg{left:50%;top:15%;transform:translateX(-50%);font-weight:700;text-shadow:0 2px 5px #000;pointer-events:none;text-align:center}
+#mobile{display:none;position:absolute;bottom:16px;right:16px;gap:8px}
+#mobile button{width:54px;height:54px;border:1px solid #ffffff55;border-radius:50%;background:#172033cc;color:white;font-size:20px}
+button{cursor:pointer}
+#restart{position:absolute;right:12px;bottom:12px;border:1px solid #ffffff44;border-radius:9px;background:#172033;color:white;padding:9px 12px}
+@media(max-width:700px){#help{display:none}#mobile{display:grid;grid-template-columns:repeat(3,54px)}#mobile button:nth-child(1){grid-column:2}#mobile button:nth-child(2){grid-column:1;grid-row:2}#mobile button:nth-child(3){grid-column:2;grid-row:2}#mobile button:nth-child(4){grid-column:3;grid-row:2}#quest{bottom:150px;max-width:220px;font-size:11px}#hud{min-width:175px;padding:8px 10px}#stats{font-size:11px}}
+</style>
+</head>
+<body>
+<div id="wrap">
+<canvas id="game" width="1100" height="650" aria-label="Shinra Spielwelt"></canvas>
+<div id="hud" class="panel">
+  <strong>⚔ SHINRA</strong> <span style="color:#fbbf24;font-size:12px">Prototyp</span>
+  <div id="stats">Krieger · Level 1 · Yang 0</div>
+  <div style="font-size:11px">LP <span id="hptext">100 / 100</span></div><div class="bar"><div id="hpfill" class="fill"></div></div>
+  <div style="font-size:11px">Erfahrung <span id="xptext">0 / 50</span></div><div class="bar"><div id="xpfill" class="fill"></div></div>
+</div>
+<div id="help" class="panel"><b>Steuerung</b><br>WASD / Pfeiltasten: Bewegen<br>Mausklick oder Leertaste: Angreifen<br>Besiege rote Waldwölfe für Erfahrung und Yang.<br><span style="color:#fbbf24">Tipp:</span> Geh nah an einen Wolf heran.</div>
+<div id="quest" class="panel">📜 <b>Auftrag: Unruhe im Wald</b><br>Besiege 3 Waldwölfe.<br><span id="kills">Besiegt: 0 / 3</span></div>
+<div id="msg"></div>
+<div id="mobile">
+<button data-key="ArrowUp">▲</button><button data-key="ArrowLeft">◀</button><button data-key="ArrowDown">▼</button><button data-key="ArrowRight">▶</button>
+</div>
+<button id="restart" onclick="location.reload()">Neu starten</button>
+</div>
+<script>
+(() => {
+const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
+const W=canvas.width,H=canvas.height;
+const keys={}, pointer={x:0,y:0}, world={w:1800,h:1300};
+const player={x:900,y:700,hp:100,maxHp:100,level:1,xp:0,next:50,yang:0,attackCd:0,flash:0};
+let kills=0, message='Willkommen in Shinra!', msgTimer=180, gameTime=0;
+const monsters=[];
+for(let i=0;i<13;i++) monsters.push({x:250+Math.random()*1300,y:180+Math.random()*950,hp:40,maxHp:40,alive:true,respawn:0,attackCd:0,hit:0});
+const trees=[];
+for(let i=0;i<95;i++) trees.push({x:Math.random()*world.w,y:Math.random()*world.h,r:13+Math.random()*19});
+const rocks=[];
+for(let i=0;i<32;i++) rocks.push({x:Math.random()*world.w,y:Math.random()*world.h,r:5+Math.random()*10});
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+function say(s){message=s;msgTimer=145}
+function screenPos(x,y){return {x:x-player.x+W/2,y:y-player.y+H/2}}
+function ellipse(x,y,rx,ry,color){ctx.fillStyle=color;ctx.beginPath();ctx.ellipse(x,y,rx,ry,0,0,Math.PI*2);ctx.fill()}
+function drawTree(t){let p=screenPos(t.x,t.y);if(p.x<-70||p.x>W+70||p.y<-90||p.y>H+70)return;
+ ellipse(p.x,p.y+12,t.r*.85,t.r*.35,'#172b25aa');
+ ctx.fillStyle='#62452f';ctx.fillRect(p.x-4,p.y-2,8,23);
+ ellipse(p.x,p.y-10,t.r,t.r*.85,'#214c36');ellipse(p.x-7,p.y-16,t.r*.65,t.r*.58,'#2d6843');}
+function drawWolf(m){let p=screenPos(m.x,m.y);if(p.x<-50||p.x>W+50||p.y<-50||p.y>H+50)return;
+ ellipse(p.x,p.y+8,22,9,'#101b18aa');
+ ctx.fillStyle=m.hit>0?'#fca5a5':'#9d4540';ctx.beginPath();ctx.moveTo(p.x-20,p.y);ctx.lineTo(p.x-12,p.y-13);ctx.lineTo(p.x-4,p.y-8);ctx.lineTo(p.x+10,p.y-12);ctx.lineTo(p.x+22,p.y-1);ctx.lineTo(p.x+17,p.y+10);ctx.lineTo(p.x-13,p.y+10);ctx.closePath();ctx.fill();
+ ctx.fillStyle='#5e292b';ctx.beginPath();ctx.moveTo(p.x+6,p.y-8);ctx.lineTo(p.x+10,p.y-20);ctx.lineTo(p.x+17,p.y-9);ctx.fill();
+ ctx.fillStyle='#f8d66d';ctx.fillRect(p.x+12,p.y-5,3,3);
+ ctx.fillStyle='#222';ctx.fillRect(p.x-18,p.y-25,36,5);ctx.fillStyle='#db4654';ctx.fillRect(p.x-18,p.y-25,36*m.hp/m.maxHp,5);
+}
+function drawPlayer(){let x=W/2,y=H/2;ellipse(x,y+13,17,7,'#101b18aa');
+ ctx.fillStyle='#c5cbd4';ctx.beginPath();ctx.moveTo(x-12,y-5);ctx.lineTo(x-9,y-20);ctx.lineTo(x+8,y-20);ctx.lineTo(x+13,y+5);ctx.lineTo(x+7,y+12);ctx.lineTo(x-10,y+10);ctx.closePath();ctx.fill();
+ ctx.fillStyle='#e6bd91';ellipse(x,y-25,8,8,'#e8c49b');
+ ctx.fillStyle='#526b9b';ctx.fillRect(x-8,y-17,16,5);
+ ctx.strokeStyle='#d9e1eb';ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(x+10,y-13);ctx.lineTo(x+24,y-34);ctx.stroke();
+ ctx.strokeStyle='#a77a42';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(x+6,y-8);ctx.lineTo(x+27,y-39);ctx.stroke();
+ if(player.attackCd>12){ctx.strokeStyle='#fff2bd';ctx.lineWidth=3;ctx.beginPath();ctx.arc(x+10,y-12,34,-1.3,.7);ctx.stroke();}
+}
+function draw(){ctx.clearRect(0,0,W,H);
+ // ground
+ ctx.fillStyle='#496747';ctx.fillRect(0,0,W,H);
+ // subtle ground tiles
+ for(let y=-40;y<H+40;y+=48)for(let x=-40;x<W+40;x+=48){let wx=Math.floor((x+player.x-W/2)/48),wy=Math.floor((y+player.y-H/2)/48);if((wx+wy)%2===0){ctx.fillStyle='#ffffff08';ctx.fillRect(x,y,48,48)}}
+ // dirt path to village
+ ctx.strokeStyle='#8b7954';ctx.lineWidth=95;ctx.lineCap='round';ctx.beginPath();let a=screenPos(900,700),b=screenPos(1110,590),c=screenPos(1320,500);ctx.moveTo(a.x,a.y+90);ctx.quadraticCurveTo(b.x,b.y,c.x,c.y);ctx.stroke();
+ // pond
+ let pond=screenPos(400,350);ellipse(pond.x,pond.y,100,58,'#315f68');ellipse(pond.x,pond.y,83,43,'#4b8790');
+ // village huts
+ for(const h of [{x:1120,y:460},{x:1250,y:530},{x:1050,y:350}]){let p=screenPos(h.x,h.y);ctx.fillStyle='#b99b70';ctx.fillRect(p.x-35,p.y-25,70,48);ctx.fillStyle='#69483a';ctx.beginPath();ctx.moveTo(p.x-44,p.y-24);ctx.lineTo(p.x,p.y-58);ctx.lineTo(p.x+44,p.y-24);ctx.fill();ctx.fillStyle='#342a25';ctx.fillRect(p.x-8,p.y-4,16,27)}
+ // decor
+ trees.forEach(drawTree);rocks.forEach(r=>{let p=screenPos(r.x,r.y);if(p.x>-20&&p.x<W+20&&p.y>-20&&p.y<H+20)ellipse(p.x,p.y,r.r,r.r*.6,'#858b7c')});
+ monsters.forEach(m=>{if(m.alive)drawWolf(m)});
+ drawPlayer();
+ // location title
+ ctx.fillStyle='#fff';ctx.font='bold 16px system-ui';ctx.textAlign='center';ctx.fillText('WALDRAND VON SHINRA',W/2, H-18);
+ if(msgTimer>0){ctx.fillStyle='#fff';ctx.font='bold 21px system-ui';ctx.textAlign='center';ctx.shadowColor='#000';ctx.shadowBlur=6;ctx.fillText(message,W/2,95);ctx.shadowBlur=0;msgTimer--}
+}
+function update(){gameTime++;
+ let dx=0,dy=0;if(keys.KeyW||keys.ArrowUp)dy--;if(keys.KeyS||keys.ArrowDown)dy++;if(keys.KeyA||keys.ArrowLeft)dx--;if(keys.KeyD||keys.ArrowRight)dx++;
+ if(dx||dy){let l=Math.hypot(dx,dy);player.x+=dx/l*3.1;player.y+=dy/l*3.1}
+ player.x=clamp(player.x,35,world.w-35);player.y=clamp(player.y,35,world.h-35);
+ if(player.attackCd>0)player.attackCd--;if(player.flash>0)player.flash--;
+ monsters.forEach(m=>{
+  if(!m.alive){m.respawn--;if(m.respawn<=0){m.alive=true;m.hp=m.maxHp;m.x=200+Math.random()*1400;m.y=150+Math.random()*1000}return}
+  let d=Math.hypot(player.x-m.x,player.y-m.y);
+  if(d<230&&d>36){m.x+=(player.x-m.x)/d*.72;m.y+=(player.y-m.y)/d*.72}
+  if(d<38&&m.attackCd<=0){player.hp-=7;m.attackCd=65;player.flash=12;say('Ein Waldwolf trifft dich!');if(player.hp<=0){player.hp=player.maxHp;player.x=900;player.y=700;say('Du wurdest zurück zum Dorf gebracht.');}}
+  if(m.attackCd>0)m.attackCd--;if(m.hit>0)m.hit--;
+ });
+ updateHud();draw();requestAnimationFrame(update)}
+function attack(){if(player.attackCd>0)return;player.attackCd=24;
+ let target=null,best=72;monsters.forEach(m=>{if(!m.alive)return;let d=Math.hypot(player.x-m.x,player.y-m.y);if(d<best){best=d;target=m}});
+ if(!target){say('Kein Gegner in Reichweite.');return}
+ target.hp-=22;target.hit=8;say('Treffer!');if(target.hp<=0){target.alive=false;target.respawn=300;kills++;player.xp+=25;player.yang+=12;say('Waldwolf besiegt! +25 EXP · +12 Yang');if(kills===3)say('Auftrag geschafft! Gute Arbeit, Krieger.');if(player.xp>=player.next){player.xp-=player.next;player.level++;player.next=Math.round(player.next*1.45);player.maxHp+=15;player.hp=player.maxHp;say('LEVEL AUFSTIEG! Du bist jetzt Level '+player.level);}}
+ updateHud()}
+function updateHud(){document.getElementById('stats').textContent=`Krieger · Level ${player.level} · Yang ${player.yang}`;document.getElementById('hptext').textContent=`${Math.max(0,player.hp)} / ${player.maxHp}`;document.getElementById('hpfill').style.width=100*player.hp/player.maxHp+'%';document.getElementById('xptext').textContent=`${player.xp} / ${player.next}`;document.getElementById('xpfill').style.width=100*player.xp/player.next+'%';document.getElementById('kills').textContent=`Besiegt: ${Math.min(3,kills)} / 3`}
+window.addEventListener('keydown',e=>{keys[e.code]=true;if(e.code==='Space'){e.preventDefault();attack()}});
+window.addEventListener('keyup',e=>keys[e.code]=false);
+canvas.addEventListener('pointerdown',e=>{let r=canvas.getBoundingClientRect();pointer.x=(e.clientX-r.left)*W/r.width;pointer.y=(e.clientY-r.top)*H/r.height;attack()});
+document.querySelectorAll('#mobile button').forEach(b=>{let k=b.dataset.key;b.addEventListener('pointerdown',e=>{e.preventDefault();keys[k]=true});['pointerup','pointerleave','pointercancel'].forEach(ev=>b.addEventListener(ev,()=>keys[k]=false))});
+update();
+})();
+</script>
+</body>
+</html>
